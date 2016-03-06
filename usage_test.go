@@ -100,3 +100,59 @@ options:
 	p.WriteHelp(&help)
 	assert.Equal(t, expectedHelp, help.String())
 }
+
+func TestVersionInHelp(t *testing.T) {
+	expectedHelp := `usage: example [--verbose]
+
+options:
+  --verbose, -v          verbosity level
+  --help, -h             display this help and exit
+  --version              output version information and exit
+`
+	var args struct {
+		Verbose bool `arg:"-v,help:verbosity level"`
+	}
+
+	SetVersion("1.2.3")
+	p, err := NewParser(Config{}, &args)
+	require.NoError(t, err)
+
+	os.Args[0] = "example"
+
+	var help bytes.Buffer
+	p.WriteHelp(&help)
+	assert.Equal(t, expectedHelp, help.String())
+}
+
+func TestWriteVersion(t *testing.T) {
+	expectedVersion := "example 1.0.0\n"
+
+	var args struct {
+	}
+
+	SetVersion("1.0.0")
+	p, err := NewParser(Config{}, &args)
+	require.NoError(t, err)
+
+	os.Args[0] = "example"
+
+	var version bytes.Buffer
+	p.WriteVersion(&version)
+	assert.Equal(t, expectedVersion, version.String())
+}
+
+func TestVersionWithProgramName(t *testing.T) {
+	expectedVersion := "myprogram 1.0.0\n"
+	config := Config{
+		Program: "myprogram",
+	}
+	SetVersion("1.0.0")
+	p, err := NewParser(config, &struct{}{})
+	require.NoError(t, err)
+
+	os.Args[0] = "example"
+
+	var version bytes.Buffer
+	p.WriteVersion(&version)
+	assert.Equal(t, expectedVersion, version.String())
+}

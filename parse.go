@@ -27,6 +27,21 @@ type spec struct {
 // ErrHelp indicates that -h or --help were provided
 var ErrHelp = errors.New("help requested by user")
 
+// ErrVersion indicates that --version were provided
+var ErrVersion = errors.New("version requested by user")
+
+// Default parser used by high level functions
+var defaultParser *Parser
+
+// SetVersion sets the version available for --version flag
+func SetVersion(version string) {
+	if defaultParser == nil {
+		defaultParser = &Parser{Version: version}
+	} else {
+		defaultParser.SetVersion(version)
+	}
+}
+
 // MustParse processes command line arguments and exits upon failure
 func MustParse(dest ...interface{}) *Parser {
 	p, err := NewParser(Config{}, dest...)
@@ -39,10 +54,19 @@ func MustParse(dest ...interface{}) *Parser {
 		p.WriteHelp(os.Stdout)
 		os.Exit(0)
 	}
+	if err == ErrVersion {
+		p.WriteVersion(os.Stdout)
+		os.Exit(0)
+	}
 	if err != nil {
 		p.Fail(err.Error())
 	}
 	return p
+}
+
+// SetVersion sets the version outputted with --version
+func (p *Parser) SetVersion(version string) {
+	p.Version = version
 }
 
 // Parse processes command line arguments and stores them in dest
@@ -61,12 +85,34 @@ type Config struct {
 
 // Parser represents a set of command line options with destination values
 type Parser struct {
-	spec   []*spec
-	config Config
+	spec    []*spec
+	config  Config
+	Version string
 }
 
 // NewParser constructs a parser from a list of destination structs
 func NewParser(config Config, dests ...interface{}) (*Parser, error) {
+	var p *Parser
+	if defaultParser == nil {
+		p = &Parser{}
+	} else {
+		p = defaultParser
+	}
+	if config.Program == "" {
+		config.Program = "program"
+		if len(os.Args) > 0 {
+			config.Program = filepath.Base(os.Args[0])
+		}
+	}
+	p.config = config
+	err := p.setSpecs(dests...)
+	if err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (p *Parser) setSpecs(dests ...interface{}) error {
 	var specs []*spec
 	for _, dest := range dests {
 		v := reflect.ValueOf(dest)
@@ -100,7 +146,7 @@ func NewParser(config Config, dests ...interface{}) (*Parser, error) {
 			var parseable bool
 			parseable, spec.boolean, spec.multiple = canParse(field.Type)
 			if !parseable {
-				return nil, fmt.Errorf("%s.%s: %s fields are not supported", t.Name(), field.Name, field.Type.String())
+				return fmt.Errorf("%s.%s: %s fields are not supported", t.Name(), field.Name, field.Type.String())
 			}
 
 			// Look at the tag
@@ -117,7 +163,7 @@ func NewParser(config Config, dests ...interface{}) (*Parser, error) {
 						spec.long = key[2:]
 					case strings.HasPrefix(key, "-"):
 						if len(key) != 2 {
-							return nil, fmt.Errorf("%s.%s: short arguments must be one character only", t.Name(), field.Name)
+							return fmt.Errorf("%s.%s: short arguments must be one character only", t.Name(), field.Name)
 						}
 						spec.short = key[1:]
 					case key == "required":
@@ -134,23 +180,16 @@ func NewParser(config Config, dests ...interface{}) (*Parser, error) {
 							spec.env = strings.ToUpper(field.Name)
 						}
 					default:
-						return nil, fmt.Errorf("unrecognized tag '%s' on field %s", key, tag)
+						return fmt.Errorf("unrecognized tag '%s' on field %s", key, tag)
 					}
 				}
 			}
 			specs = append(specs, &spec)
 		}
 	}
-	if config.Program == "" {
-		config.Program = "program"
-		if len(os.Args) > 0 {
-			config.Program = filepath.Base(os.Args[0])
-		}
-	}
-	return &Parser{
-		spec:   specs,
-		config: config,
-	}, nil
+
+	p.spec = specs
+	return nil
 }
 
 // Parse processes the given command line option, storing the results in the field
@@ -160,6 +199,9 @@ func (p *Parser) Parse(args []string) error {
 	for _, arg := range args {
 		if arg == "-h" || arg == "--help" {
 			return ErrHelp
+		}
+		if p.Version != "" && arg == "--version" {
+			return ErrVersion
 		}
 		if arg == "--" {
 			break
